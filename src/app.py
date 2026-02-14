@@ -5,19 +5,35 @@ A super simple FastAPI application that allows students to view and sign up
 for extracurricular activities at Mergington High School.
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
+import json
+import logging
 import os
 from pathlib import Path
+import secrets
 
 app = FastAPI(title="Mergington High School API",
               description="API for viewing and signing up for extracurricular activities")
+
+logger = logging.getLogger("mergington_api")
+security = HTTPBasic()
 
 # Mount the static files directory
 current_dir = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=os.path.join(Path(__file__).parent,
           "static")), name="static")
+
+teachers_file = current_dir / "teachers.json"
+with open(teachers_file, "r", encoding="utf-8") as f:
+    teacher_data = json.load(f)
+
+teacher_credentials = {
+    teacher["username"]: teacher["password"]
+    for teacher in teacher_data.get("teachers", [])
+}
 
 # In-memory activity database
 activities = {
@@ -88,6 +104,27 @@ def get_activities():
     return activities
 
 
+def require_teacher(credentials: HTTPBasicCredentials = Depends(security)) -> str:
+    expected_password = teacher_credentials.get(credentials.username)
+    if not expected_password or not secrets.compare_digest(credentials.password, expected_password):
+        logger.warning(
+            "Unauthorized teacher action attempt for username='%s'",
+            credentials.username,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Teacher authentication required",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+    return credentials.username
+
+
+@app.get("/auth/teacher")
+def verify_teacher_access(teacher_username: str = Depends(require_teacher)):
+    return {"message": f"Authenticated as {teacher_username}"}
+
+
 @app.post("/activities/{activity_name}/signup")
 def signup_for_activity(activity_name: str, email: str):
     """Sign up a student for an activity"""
@@ -111,7 +148,11 @@ def signup_for_activity(activity_name: str, email: str):
 
 
 @app.delete("/activities/{activity_name}/unregister")
-def unregister_from_activity(activity_name: str, email: str):
+def unregister_from_activity(
+    activity_name: str,
+    email: str,
+    teacher_username: str = Depends(require_teacher),
+):
     """Unregister a student from an activity"""
     # Validate activity exists
     if activity_name not in activities:
@@ -129,4 +170,12 @@ def unregister_from_activity(activity_name: str, email: str):
 
     # Remove student
     activity["participants"].remove(email)
+
+    logger.info(
+        "Teacher '%s' unregistered '%s' from '%s'",
+        teacher_username,
+        email,
+        activity_name,
+    )
+
     return {"message": f"Unregistered {email} from {activity_name}"}

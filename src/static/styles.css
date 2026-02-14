@@ -28,6 +28,27 @@ header h1 {
   margin-bottom: 10px;
 }
 
+.teacher-auth {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.teacher-auth input {
+  padding: 8px 10px;
+  border: 1px solid #c5cae9;
+  border-radius: 4px;
+  min-width: 180px;
+}
+
+.teacher-status {
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: #e8eaf6;
+}
+
 main {
   display: flex;
   flex-wrap: wrap;
