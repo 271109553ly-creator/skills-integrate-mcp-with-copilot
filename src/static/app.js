@@ -3,6 +3,43 @@ document.addEventListener("DOMContentLoaded", () => {
   const activitySelect = document.getElementById("activity");
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
+  const teacherUsernameInput = document.getElementById("teacher-username");
+  const teacherPasswordInput = document.getElementById("teacher-password");
+  const teacherLoginBtn = document.getElementById("teacher-login-btn");
+  const teacherLogoutBtn = document.getElementById("teacher-logout-btn");
+  const teacherStatus = document.getElementById("teacher-status");
+
+  let teacherAuthHeader = null;
+
+  function showMessage(text, type) {
+    messageDiv.textContent = text;
+    messageDiv.className = type;
+    messageDiv.classList.remove("hidden");
+
+    setTimeout(() => {
+      messageDiv.classList.add("hidden");
+    }, 5000);
+  }
+
+  function updateTeacherUI(authenticated, username = "") {
+    if (authenticated) {
+      teacherStatus.textContent = `Teacher mode is on (${username}). You can unregister students.`;
+      teacherLoginBtn.classList.add("hidden");
+      teacherLogoutBtn.classList.remove("hidden");
+      teacherUsernameInput.disabled = true;
+      teacherPasswordInput.disabled = true;
+    } else {
+      teacherStatus.textContent = "Teacher mode is off. Unregister is restricted.";
+      teacherLoginBtn.classList.remove("hidden");
+      teacherLogoutBtn.classList.add("hidden");
+      teacherUsernameInput.disabled = false;
+      teacherPasswordInput.disabled = false;
+    }
+  }
+
+  function getAuthHeaders() {
+    return teacherAuthHeader ? { Authorization: teacherAuthHeader } : {};
+  }
 
   // Function to fetch activities from API
   async function fetchActivities() {
@@ -30,7 +67,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 ${details.participants
                   .map(
                     (email) =>
-                      `<li><span class="participant-email">${email}</span><button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button></li>`
+                      `<li><span class="participant-email">${email}</span>${
+                        teacherAuthHeader
+                          ? `<button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button>`
+                          : ""
+                      }</li>`
                   )
                   .join("")}
               </ul>
@@ -73,6 +114,19 @@ document.addEventListener("DOMContentLoaded", () => {
     const activity = button.getAttribute("data-activity");
     const email = button.getAttribute("data-email");
 
+    if (!teacherAuthHeader) {
+      showMessage("Only authenticated teachers can unregister students.", "error");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Confirm unregister ${email} from ${activity}? This action cannot be undone.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
     try {
       const response = await fetch(
         `/activities/${encodeURIComponent(
@@ -80,35 +134,74 @@ document.addEventListener("DOMContentLoaded", () => {
         )}/unregister?email=${encodeURIComponent(email)}`,
         {
           method: "DELETE",
+          headers: getAuthHeaders(),
         }
       );
 
       const result = await response.json();
 
       if (response.ok) {
-        messageDiv.textContent = result.message;
-        messageDiv.className = "success";
+        showMessage(result.message, "success");
 
         // Refresh activities list to show updated participants
         fetchActivities();
       } else {
-        messageDiv.textContent = result.detail || "An error occurred";
-        messageDiv.className = "error";
+        showMessage(result.detail || "An error occurred", "error");
       }
-
-      messageDiv.classList.remove("hidden");
-
-      // Hide message after 5 seconds
-      setTimeout(() => {
-        messageDiv.classList.add("hidden");
-      }, 5000);
     } catch (error) {
-      messageDiv.textContent = "Failed to unregister. Please try again.";
-      messageDiv.className = "error";
-      messageDiv.classList.remove("hidden");
+      showMessage("Failed to unregister. Please try again.", "error");
       console.error("Error unregistering:", error);
     }
   }
+
+  teacherLoginBtn.addEventListener("click", async () => {
+    const username = teacherUsernameInput.value.trim();
+    const password = teacherPasswordInput.value;
+
+    if (!username || !password) {
+      showMessage("Enter teacher username and password.", "error");
+      return;
+    }
+
+    const encoded = btoa(`${username}:${password}`);
+    const authHeader = `Basic ${encoded}`;
+
+    try {
+      const response = await fetch("/auth/teacher", {
+        headers: {
+          Authorization: authHeader,
+        },
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        teacherAuthHeader = authHeader;
+        updateTeacherUI(true, username);
+        teacherPasswordInput.value = "";
+        showMessage(result.message || "Teacher authenticated.", "success");
+        fetchActivities();
+      } else {
+        teacherAuthHeader = null;
+        updateTeacherUI(false);
+        showMessage(result.detail || "Teacher authentication failed.", "error");
+      }
+    } catch (error) {
+      teacherAuthHeader = null;
+      updateTeacherUI(false);
+      showMessage("Failed to verify teacher credentials.", "error");
+      console.error("Error during teacher login:", error);
+    }
+  });
+
+  teacherLogoutBtn.addEventListener("click", () => {
+    teacherAuthHeader = null;
+    teacherUsernameInput.value = "";
+    teacherPasswordInput.value = "";
+    updateTeacherUI(false);
+    showMessage("Teacher mode turned off.", "info");
+    fetchActivities();
+  });
 
   // Handle form submission
   signupForm.addEventListener("submit", async (event) => {
@@ -130,31 +223,21 @@ document.addEventListener("DOMContentLoaded", () => {
       const result = await response.json();
 
       if (response.ok) {
-        messageDiv.textContent = result.message;
-        messageDiv.className = "success";
+        showMessage(result.message, "success");
         signupForm.reset();
 
         // Refresh activities list to show updated participants
         fetchActivities();
       } else {
-        messageDiv.textContent = result.detail || "An error occurred";
-        messageDiv.className = "error";
+        showMessage(result.detail || "An error occurred", "error");
       }
-
-      messageDiv.classList.remove("hidden");
-
-      // Hide message after 5 seconds
-      setTimeout(() => {
-        messageDiv.classList.add("hidden");
-      }, 5000);
     } catch (error) {
-      messageDiv.textContent = "Failed to sign up. Please try again.";
-      messageDiv.className = "error";
-      messageDiv.classList.remove("hidden");
+      showMessage("Failed to sign up. Please try again.", "error");
       console.error("Error signing up:", error);
     }
   });
 
   // Initialize app
+  updateTeacherUI(false);
   fetchActivities();
 });
